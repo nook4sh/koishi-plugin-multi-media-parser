@@ -15,6 +15,24 @@ import {
   fetchXhsNote,
   XhsNote,
 } from './parsers/xhs'
+import {
+  buildWeiboMessages,
+  extractWeiboLinks,
+  fetchWeiboPost,
+  WeiboPost,
+} from './parsers/weibo'
+import {
+  buildXMessages,
+  extractXLinks,
+  fetchXPost,
+  XPost,
+} from './parsers/x'
+import {
+  buildZhihuMessages,
+  extractZhihuLinks,
+  fetchZhihuPost,
+  ZhihuPost,
+} from './parsers/zhihu'
 
 export const name = 'gensokyo-parser'
 
@@ -57,6 +75,30 @@ export interface Config {
       cookie?: string
       timeout: number
       showAuthor: boolean
+    }
+    weibo: {
+      enabled: boolean
+      userAgent: string
+      cookie?: string
+      timeout: number
+      showAuthor: boolean
+      showStats: boolean
+    }
+    x: {
+      enabled: boolean
+      userAgent: string
+      cookie?: string
+      timeout: number
+      showAuthor: boolean
+      showStats: boolean
+    }
+    zhihu: {
+      enabled: boolean
+      userAgent: string
+      cookie?: string
+      timeout: number
+      showAuthor: boolean
+      showStats: boolean
     }
   }
 }
@@ -128,6 +170,30 @@ export const Config: Schema<Config> = Schema.intersect([
         cookie: Schema.string().role('textarea').default('').description('可选 Cookie。遇到风控或无法读取页面数据时可填写。'),
         timeout: Schema.number().min(3).max(60).step(1).default(15).description('请求超时时间，单位秒。'),
       }).description('抖音'),
+      weibo: Schema.object({
+        enabled: Schema.boolean().default(true).description('开启微博子解析器。'),
+        showAuthor: Schema.boolean().default(true).description('展示作者。'),
+        showStats: Schema.boolean().default(true).description('展示点赞、评论、转发数据。'),
+        userAgent: Schema.string().default('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0').description('请求微博页面时使用的 User-Agent。'),
+        cookie: Schema.string().role('textarea').default('').description('可选 Cookie。遇到风控或无法读取页面数据时可填写。'),
+        timeout: Schema.number().min(3).max(60).step(1).default(15).description('请求超时时间，单位秒。'),
+      }).description('微博'),
+      x: Schema.object({
+        enabled: Schema.boolean().default(true).description('开启 X / Twitter 子解析器。'),
+        showAuthor: Schema.boolean().default(true).description('展示作者。'),
+        showStats: Schema.boolean().default(true).description('展示点赞、回复、转发、引用数据。'),
+        userAgent: Schema.string().default('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0').description('请求 X 解析接口时使用的 User-Agent。'),
+        cookie: Schema.string().role('textarea').default('').description('可选 Cookie。'),
+        timeout: Schema.number().min(3).max(60).step(1).default(15).description('请求超时时间，单位秒。'),
+      }).description('X / Twitter'),
+      zhihu: Schema.object({
+        enabled: Schema.boolean().default(true).description('开启知乎子解析器。'),
+        showAuthor: Schema.boolean().default(true).description('展示作者。'),
+        showStats: Schema.boolean().default(true).description('展示赞同/喜欢、评论、收藏、浏览数据。'),
+        userAgent: Schema.string().default('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0').description('请求知乎接口时使用的 User-Agent。'),
+        cookie: Schema.string().role('textarea').default('').description('可选 Cookie。遇到风控或无法读取接口时可填写。'),
+        timeout: Schema.number().min(3).max(60).step(1).default(15).description('请求超时时间，单位秒。'),
+      }).description('知乎'),
     }).description('子解析器设置'),
     showError: Schema.boolean().default(false).description('解析失败时向聊天发送错误提示。'),
     loggerinfo: Schema.boolean().default(false).description('输出调试日志。').experimental(),
@@ -146,6 +212,10 @@ export const usage = `
 - https://v.douyin.com/_2ljF4AmKL8/
 - https://www.douyin.com/video/7521023890996514083
 - https://www.douyin.com/note/7469411074119322899
+- https://weibo.com/7207262816/P5kWdcfDe
+- https://x.com/openai/status/...
+- https://www.zhihu.com/question/67423622
+- https://zhuanlan.zhihu.com/p/...
 `
 
 export function apply(ctx: Context, config: Config) {
@@ -182,6 +252,15 @@ function collectTargets(content: string, config: Config): ParseTarget[] {
   }
   if (config.parsers.douyin.enabled) {
     targets.push(...extractDouyinLinks(content).map((link) => ({ parser: 'douyin' as const, label: '抖音', link })))
+  }
+  if (config.parsers.weibo.enabled) {
+    targets.push(...extractWeiboLinks(content).map((link) => ({ parser: 'weibo' as const, label: '微博', link })))
+  }
+  if (config.parsers.x.enabled) {
+    targets.push(...extractXLinks(content).map((link) => ({ parser: 'x' as const, label: 'X', link })))
+  }
+  if (config.parsers.zhihu.enabled) {
+    targets.push(...extractZhihuLinks(content).map((link) => ({ parser: 'zhihu' as const, label: '知乎', link })))
   }
 
   const seen = new Set<string>()
@@ -239,8 +318,23 @@ async function parseTarget(ctx: Context, session: any, target: ParseTarget, conf
     return buildXhsMessages(note, toXhsConfig(config), session)
   }
 
-  const post = await prepareDouyinVideo(ctx, await fetchDouyinPost(target.link, toDouyinConfig(config)), config)
-  return buildDouyinMessages(post, toDouyinConfig(config), session)
+  if (target.parser === 'douyin') {
+    const post = await prepareDouyinVideo(ctx, await fetchDouyinPost(target.link, toDouyinConfig(config)), config)
+    return buildDouyinMessages(post, toDouyinConfig(config), session)
+  }
+
+  if (target.parser === 'weibo') {
+    const post = await prepareSimpleVideo(ctx, await fetchWeiboPost(target.link, toWeiboConfig(config)), config, 'weibo')
+    return buildWeiboMessages(post, toWeiboConfig(config), session)
+  }
+
+  if (target.parser === 'x') {
+    const post = await prepareSimpleVideo(ctx, await fetchXPost(target.link, toXConfig(config)), config, 'x')
+    return buildXMessages(post, toXConfig(config), session)
+  }
+
+  const post = await prepareSimpleVideo(ctx, await fetchZhihuPost(target.link, toZhihuConfig(config)), config, 'zhihu')
+  return buildZhihuMessages(post, toZhihuConfig(config), session)
 }
 
 function toXhsConfig(config: Config) {
@@ -258,6 +352,42 @@ function toXhsConfig(config: Config) {
 function toDouyinConfig(config: Config) {
   return {
     ...config.parsers.douyin,
+    showVideo: config.showVideo,
+    showImages: config.showImages,
+    maxImages: config.maxImages,
+    maxDescLength: config.maxDescLength,
+    descTruncateSuffix: config.descTruncateSuffix,
+    showLink: config.showLink,
+  }
+}
+
+function toWeiboConfig(config: Config) {
+  return {
+    ...config.parsers.weibo,
+    showVideo: config.showVideo,
+    showImages: config.showImages,
+    maxImages: config.maxImages,
+    maxDescLength: config.maxDescLength,
+    descTruncateSuffix: config.descTruncateSuffix,
+    showLink: config.showLink,
+  }
+}
+
+function toXConfig(config: Config) {
+  return {
+    ...config.parsers.x,
+    showVideo: config.showVideo,
+    showImages: config.showImages,
+    maxImages: config.maxImages,
+    maxDescLength: config.maxDescLength,
+    descTruncateSuffix: config.descTruncateSuffix,
+    showLink: config.showLink,
+  }
+}
+
+function toZhihuConfig(config: Config) {
+  return {
+    ...config.parsers.zhihu,
     showVideo: config.showVideo,
     showImages: config.showImages,
     maxImages: config.maxImages,
@@ -317,6 +447,22 @@ async function prepareDouyinVideo(ctx: Context, post: DouyinPost, config: Config
         videoUrls: fromDynamic ? remainingVideoUrls : [replacement.src, ...remainingVideoUrls],
       }
     },
+  })
+}
+
+async function prepareSimpleVideo<T extends WeiboPost | XPost | ZhihuPost>(ctx: Context, post: T, config: Config, parser: string): Promise<T> {
+  return prepareVideo(ctx, post, config, {
+    parser,
+    urls: (value) => value.videoUrls,
+    remove: (value) => ({ ...value, videoBuffer: undefined, videoUrls: [], videoSkippedMessage: VIDEO_TOO_LARGE_MESSAGE }),
+    replace: (value, replacement) => ({
+      ...value,
+      videoBuffer: replacement.kind === 'buffer' ? replacement.buffer : undefined,
+      videoMimeType: replacement.mimeType,
+      videoUrls: replacement.kind === 'buffer'
+        ? value.videoUrls.slice(1)
+        : [replacement.src, ...value.videoUrls.slice(1)],
+    }),
   })
 }
 
@@ -416,7 +562,13 @@ async function getRemoteVideoSize(ctx: Context, url: string, config: Config): Pr
 
   try {
     if (config.loggerinfo) logger.info(`check remote video size start: url=${url}`)
-    const timeout = Math.min(...[config.parsers.xhs.timeout, config.parsers.douyin.timeout].filter((value) => Number.isFinite(value))) * 1000
+    const timeout = Math.min(...[
+      config.parsers.xhs.timeout,
+      config.parsers.douyin.timeout,
+      config.parsers.weibo.timeout,
+      config.parsers.x.timeout,
+      config.parsers.zhihu.timeout,
+    ].filter((value) => Number.isFinite(value))) * 1000
     const headers = await ctx.http.head(url, { timeout })
     const contentLength = headers.get('content-length')
     if (!contentLength) {
@@ -478,4 +630,7 @@ function shouldProcess(recent: Map<string, number>, channelId: string, target: P
 }
 
 export * from './parsers/douyin'
+export * from './parsers/weibo'
+export * from './parsers/x'
 export * from './parsers/xhs'
+export * from './parsers/zhihu'

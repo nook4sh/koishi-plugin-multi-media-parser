@@ -1,8 +1,14 @@
 import {
+  extractWeiboLinks,
   extractDouyinLinks,
+  extractXLinks,
   extractXhsLinks,
+  extractZhihuLinks,
+  fetchWeiboPost,
   fetchDouyinPost,
+  fetchXPost,
   fetchXhsNote,
+  fetchZhihuPost,
 } from '../src'
 
 const input = process.argv.slice(2).join(' ')
@@ -41,6 +47,45 @@ async function main() {
       userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.5 Mobile/15E148 Safari/604.1',
       timeout: 15,
       showAuthor: true,
+    })
+    console.log(JSON.stringify(post, null, 2))
+    return
+  }
+
+  const weibo = extractWeiboLinks(input)[0]
+  if (weibo) {
+    const post = await fetchWeiboPost(weibo, {
+      ...common,
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0',
+      timeout: 15,
+      showAuthor: true,
+      showStats: true,
+    })
+    console.log(JSON.stringify(post, null, 2))
+    return
+  }
+
+  const x = extractXLinks(input)[0]
+  if (x) {
+    const post = await fetchXPost(x, {
+      ...common,
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0',
+      timeout: 15,
+      showAuthor: true,
+      showStats: true,
+    })
+    console.log(JSON.stringify(post, null, 2))
+    return
+  }
+
+  const zhihu = extractZhihuLinks(input)[0]
+  if (zhihu) {
+    const post = await fetchZhihuPost(zhihu, {
+      ...common,
+      userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36 Edg/143.0.0.0',
+      timeout: 15,
+      showAuthor: true,
+      showStats: true,
     })
     console.log(JSON.stringify(post, null, 2))
     return

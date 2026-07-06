@@ -1,0 +1,261 @@
+import { h } from 'koishi'
+import {
+  ensureProtocol,
+  extractLinks,
+  fetchWithTimeout,
+  formatCount,
+  ParserConfigLike,
+  stripHtml,
+  trimText,
+  unique,
+  URL_BOUNDARY,
+} from './common'
+
+export interface WeiboConfigLike extends ParserConfigLike {
+  showAuthor: boolean
+  showStats: boolean
+}
+
+export interface WeiboPost {
+  id: string
+  url: string
+  title: string
+  desc: string
+  authorName: string
+  authorId?: string
+  likedCount?: string | number
+  repostCount?: string | number
+  commentCount?: string | number
+  imageUrls: string[]
+  videoUrls: string[]
+  videoBuffer?: Buffer
+  videoMimeType?: string
+  videoSkippedMessage?: string
+  repost?: WeiboPost
+}
+
+const LINK_PATTERNS = [
+  new RegExp(`https?://(?:www\\.)?weibo\\.com/\\d+/${URL_BOUNDARY}`, 'gi'),
+  new RegExp(`https?://m\\.weibo\\.cn/(?:status|detail|\\d+)/${URL_BOUNDARY}`, 'gi'),
+  new RegExp(`https?://(?:www\\.)?weibo\\.com/tv/show/${URL_BOUNDARY}`, 'gi'),
+  new RegExp(`https?://video\\.weibo\\.com/show\\?${URL_BOUNDARY}`, 'gi'),
+  new RegExp(`https?://mapp\\.api\\.weibo\\.cn/fx/${URL_BOUNDARY}`, 'gi'),
+  new RegExp(`https?://(?:www\\.)?weibo\\.com/ttarticle/${URL_BOUNDARY}`, 'gi'),
+  new RegExp(`https?://card\\.weibo\\.com/article/m/show/id/${URL_BOUNDARY}`, 'gi'),
+]
+
+export function extractWeiboLinks(content: string): string[] {
+  return extractLinks(content, LINK_PATTERNS)
+}
+
+export async function fetchWeiboPost(rawUrl: string, config: WeiboConfigLike): Promise<WeiboPost> {
+  const url = await resolveWeiboLink(rawUrl, config)
+  const articleId = extractArticleId(url)
+  if (articleId) return fetchWeiboArticle(articleId, config)
+
+  const fid = extractVideoFid(url)
+  if (fid) return fetchWeiboTv(fid, config)
+
+  const id = extractWeiboId(url)
+  if (!id) throw new Error('未能识别微博 ID。')
+
+  const api = new URL('https://www.weibo.com/ajax/statuses/show')
+  api.searchParams.set('id', id)
+  const data = await fetchJson(api.toString(), config, {
+    referer: 'https://www.weibo.com/',
+    accept: 'application/json,text/plain,*/*',
+  })
+  return buildWeiboPost(data, config)
+}
+
+export function buildWeiboMessages(post: WeiboPost, config: WeiboConfigLike, session?: { userId?: string, username?: string, author?: { nickname?: string } }) {
+  const messages: h[] = []
+  const attrs = {
+    userId: session?.userId,
+    nickname: session?.author?.nickname || session?.username,
+  }
+
+  messages.push(h('message', attrs, h.text(formatWeiboText(post, config))))
+
+  if (config.showImages) {
+    for (const imageUrl of post.imageUrls.slice(0, config.maxImages)) {
+      messages.push(h('message', attrs, h.image(imageUrl)))
+    }
+  }
+
+  if (config.showVideo) {
+    if (post.videoBuffer) messages.push(h('message', attrs, h.video(post.videoBuffer, post.videoMimeType || 'video/mp4')))
+    for (const videoUrl of post.videoUrls.slice(0, 1)) messages.push(h('message', attrs, h.video(videoUrl)))
+  }
+
+  if (post.repost) {
+    messages.push(h('message', attrs, h.text(`转发微博：\n${formatWeiboText(post.repost, config)}`)))
+  }
+
+  if (post.videoSkippedMessage) messages.push(h('message', attrs, h.text(post.videoSkippedMessage)))
+
+  return messages
+}
+
+async function resolveWeiboLink(rawUrl: string, config: WeiboConfigLike) {
+  const url = ensureProtocol(rawUrl)
+  if (!/mapp\.api\.weibo\.cn\/fx/i.test(url)) return url
+  const response = await fetchWithTimeout(url, config, { redirect: 'follow' })
+  return response.url || url
+}
+
+async function fetchWeiboArticle(id: string, config: WeiboConfigLike): Promise<WeiboPost> {
+  const api = new URL('https://card.weibo.com/article/m/aj/detail')
+  api.searchParams.set('id', id)
+  const data = await fetchJson(api.toString(), config, { referer: 'https://weibo.com/' })
+  const detail = data?.data || data
+
+  return {
+    id,
+    url: detail?.url || `https://weibo.com/ttarticle/p/show?id=${id}`,
+    title: String(detail?.title || '微博文章'),
+    desc: stripHtml(String(detail?.content || detail?.summary || '')),
+    authorName: String(detail?.userinfo?.screen_name || detail?.user?.screen_name || '未知作者'),
+    authorId: String(detail?.userinfo?.idstr || detail?.user?.idstr || ''),
+    likedCount: detail?.like_count,
+    repostCount: detail?.repost_count,
+    commentCount: detail?.comment_count,
+    imageUrls: unique(extractImageUrls(detail)),
+    videoUrls: [],
+  }
+}
+
+async function fetchWeiboTv(fid: string, config: WeiboConfigLike): Promise<WeiboPost> {
+  const payload = JSON.stringify({ Component_Play_Playinfo: { oid: fid } })
+  const response = await fetchWithTimeout(`https://weibo.com/tv/api/component?page=/show/${encodeURIComponent(fid)}`, config, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      referer: 'https://weibo.com/',
+    },
+    body: new URLSearchParams({ data: payload }),
+  })
+  if (!response.ok) throw new Error(`请求微博视频失败：HTTP ${response.status}`)
+  const json = await response.json() as any
+  const info = json?.data?.Component_Play_Playinfo || {}
+
+  return {
+    id: fid,
+    url: `https://h5.video.weibo.com/show/${fid}`,
+    title: String(info.title || '微博视频'),
+    desc: stripHtml(String(info.text || '')),
+    authorName: String(info.author || '未知作者'),
+    likedCount: info.attitudes_count,
+    repostCount: info.reposts_count,
+    commentCount: info.comments_count,
+    imageUrls: info.cover_image ? [`https:${String(info.cover_image).replace(/^https?:/, '')}`] : [],
+    videoUrls: [normalizeProtocol(firstValue(info.urls) || info.stream_url)].filter(Boolean),
+  }
+}
+
+async function buildWeiboPost(data: any, config: WeiboConfigLike): Promise<WeiboPost> {
+  const text = data?.isLongText ? await fetchLongText(data.idstr, config).catch(() => data.text_raw || data.text || '') : data?.text_raw || data?.text || ''
+  const repost = data?.retweeted_status ? await buildWeiboPost(data.retweeted_status, config) : undefined
+  const mediaVideo = data?.page_info?.media_info?.stream_url_hd || data?.page_info?.media_info?.stream_url
+
+  return {
+    id: String(data?.idstr || data?.mid || ''),
+    url: data?.user?.idstr && data?.idstr ? `https://weibo.com/${data.user.idstr}/${data.idstr}` : '',
+    title: stripHtml(String(text || '微博')),
+    desc: stripHtml(String(text || '')),
+    authorName: String(data?.user?.screen_name || '未知作者'),
+    authorId: String(data?.user?.idstr || ''),
+    likedCount: data?.attitudes_count,
+    repostCount: data?.reposts_count,
+    commentCount: data?.comments_count,
+    imageUrls: unique(extractImageUrls(data)),
+    videoUrls: unique([
+      ...extractLivePhotoUrls(data),
+      mediaVideo ? normalizeProtocol(mediaVideo) : '',
+    ]),
+    repost,
+  }
+}
+
+async function fetchLongText(id: string, config: WeiboConfigLike) {
+  const api = new URL('https://weibo.com/ajax/statuses/longtext')
+  api.searchParams.set('id', id)
+  const data = await fetchJson(api.toString(), config, { referer: 'https://weibo.com/' })
+  return data?.data?.longTextContent_raw || ''
+}
+
+async function fetchJson(url: string, config: WeiboConfigLike, headers: Record<string, string> = {}) {
+  const response = await fetchWithTimeout(url, config, {
+    redirect: 'follow',
+    headers: {
+      accept: 'application/json,text/plain,*/*',
+      ...headers,
+    },
+  })
+  if (!response.ok) throw new Error(`请求微博接口失败：HTTP ${response.status}`)
+  return response.json()
+}
+
+function formatWeiboText(post: WeiboPost, config: WeiboConfigLike) {
+  const lines = [`微博：${trimText(post.title || '微博', config.maxDescLength || 80, config.descTruncateSuffix)}`]
+  if (config.showAuthor) lines.push(`作者：${post.authorName}`)
+  if (post.desc && post.desc !== post.title && config.maxDescLength > 0) {
+    lines.push(trimText(post.desc, config.maxDescLength, config.descTruncateSuffix))
+  }
+  if (config.showStats) {
+    lines.push(`点赞：${formatCount(post.likedCount)}  评论：${formatCount(post.commentCount)}  转发：${formatCount(post.repostCount)}`)
+  }
+  if (config.showLink && post.url) lines.push(post.url)
+  return lines.join('\n')
+}
+
+function extractArticleId(url: string) {
+  return url.match(/[?&#]id=(\d+)/)?.[1] || url.match(/\/article\/m\/show\/id\/(\d+)/)?.[1] || ''
+}
+
+function extractVideoFid(url: string) {
+  const fid = url.match(/[?&]fid=([^&#]+)/)?.[1] || url.match(/\/tv\/show\/([^?#]+)/)?.[1] || ''
+  return fid ? decodeURIComponent(fid) : ''
+}
+
+function extractWeiboId(url: string) {
+  const normalized = ensureProtocol(url)
+  const direct = normalized.match(/weibo\.com\/\d+\/([0-9A-Za-z]+)/i)?.[1]
+    || normalized.match(/m\.weibo\.cn\/(?:status|detail|\d+)\/([0-9A-Za-z]+)/i)?.[1]
+  if (!direct) return ''
+  return /^\d+$/.test(direct) ? direct : direct
+}
+
+function extractImageUrls(data: any) {
+  const urls: string[] = []
+  const picInfos = data?.pic_infos && typeof data.pic_infos === 'object' ? Object.values(data.pic_infos) : []
+  for (const pic of picInfos as any[]) {
+    const url = pic?.original?.url || pic?.large?.url || pic?.url
+    if (url) urls.push(normalizeProtocol(url))
+  }
+  for (const pic of Array.isArray(data?.pics) ? data.pics : []) {
+    const url = pic?.large?.url || pic?.url || pic?.pic_big
+    if (url) urls.push(normalizeProtocol(url))
+  }
+  return urls
+}
+
+function extractLivePhotoUrls(data: any) {
+  const urls: string[] = []
+  const picInfos = data?.pic_infos && typeof data.pic_infos === 'object' ? Object.values(data.pic_infos) : []
+  for (const pic of picInfos as any[]) {
+    if (pic?.video) urls.push(normalizeProtocol(pic.video))
+  }
+  return urls
+}
+
+function normalizeProtocol(url: string) {
+  if (!url) return ''
+  return url.startsWith('//') ? `https:${url}` : url
+}
+
+function firstValue(value: unknown) {
+  if (!value || typeof value !== 'object') return ''
+  return String(Object.values(value)[0] || '')
+}
+
