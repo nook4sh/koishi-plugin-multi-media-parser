@@ -4,7 +4,7 @@ vi.mock('koishi', async () => ({
   h: (await vi.importActual<typeof import('@satorijs/core')>('@satorijs/core')).h,
 }))
 
-import { buildWeiboMessages, extractWeiboLinks, fetchWeiboPost } from '../src/parsers/weibo'
+import { buildWeiboMessages, extractWeiboLinks, fetchWeiboPost, weiboMblogIdToMid } from '../src/parsers/weibo'
 
 const config = {
   userAgent: 'test',
@@ -63,6 +63,29 @@ describe('buildWeiboMessages', () => {
 })
 
 describe('fetchWeiboPost', () => {
+  it('converts mblogid status links to numeric mids for the status API', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        idstr: '5112721292920028',
+        mblogid: 'P5kWdcfDe',
+        text_raw: '微博正文',
+        user: { idstr: '7207262816', screen_name: '作者' },
+      }),
+    } as Response)
+
+    const post = await fetchWeiboPost('https://weibo.com/7207262816/P5kWdcfDe', {
+      ...config,
+      cookie: 'SUB=test; XSRF-TOKEN=test',
+    })
+
+    expect(weiboMblogIdToMid('P5kWdcfDe')).toBe('5112721292920028')
+    expect(fetchMock.mock.calls[0]?.[0]?.toString()).toContain('id=5112721292920028')
+    expect(post.url).toBe('https://weibo.com/7207262816/P5kWdcfDe')
+
+    fetchMock.mockRestore()
+  })
+
   it('maps status API responses', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
@@ -90,6 +113,34 @@ describe('fetchWeiboPost', () => {
     expect(post.imageUrls).toEqual(['https://example.com/1.jpg'])
     expect(post.videoUrls).toEqual(['https://example.com/1.mp4'])
     expect(fetchMock.mock.calls[0]?.[0]?.toString()).toContain('/ajax/statuses/show')
+
+    fetchMock.mockRestore()
+  })
+
+  it('rejects empty status API responses', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({}),
+    } as Response)
+
+    await expect(fetchWeiboPost('https://m.weibo.cn/status/Q0KtXh6z2', {
+      ...config,
+      cookie: 'SUB=test; XSRF-TOKEN=test',
+    })).rejects.toThrow('微博接口未返回有效微博数据')
+
+    fetchMock.mockRestore()
+  })
+
+  it('surfaces Weibo status API messages', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: 0, message: '由于博主设置，目前内容暂不可见。' }),
+    } as Response)
+
+    await expect(fetchWeiboPost('https://m.weibo.cn/status/Q0KtXh6z2', {
+      ...config,
+      cookie: 'SUB=test; XSRF-TOKEN=test',
+    })).rejects.toThrow('由于博主设置，目前内容暂不可见')
 
     fetchMock.mockRestore()
   })

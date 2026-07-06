@@ -47,6 +47,7 @@ const LINK_PATTERNS = [
 let weiboCookie = ''
 let weiboVisitorReadyAt = 0
 const WEIBO_VISITOR_TTL = 3 * 60 * 60 * 1000
+const WEIBO_BASE62 = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
 export function extractWeiboLinks(content: string): string[] {
   return extractLinks(content, LINK_PATTERNS)
@@ -158,13 +159,16 @@ async function fetchWeiboTv(fid: string, config: WeiboConfigLike): Promise<Weibo
 }
 
 async function buildWeiboPost(data: any, config: WeiboConfigLike): Promise<WeiboPost> {
+  if (!isValidWeiboStatus(data)) throw new Error('微博接口未返回有效微博数据。')
+
   const text = data?.isLongText ? await fetchLongText(data.idstr, config).catch(() => data.text_raw || data.text || '') : data?.text_raw || data?.text || ''
   const repost = data?.retweeted_status ? await buildWeiboPost(data.retweeted_status, config) : undefined
   const mediaVideo = data?.page_info?.media_info?.stream_url_hd || data?.page_info?.media_info?.stream_url
+  const statusId = String(data?.mblogid || data?.idstr || data?.mid || '')
 
   return {
     id: String(data?.idstr || data?.mid || ''),
-    url: data?.user?.idstr && data?.idstr ? `https://weibo.com/${data.user.idstr}/${data.idstr}` : '',
+    url: data?.user?.idstr && statusId ? `https://weibo.com/${data.user.idstr}/${statusId}` : '',
     title: stripHtml(String(text || '微博')),
     desc: stripHtml(String(text || '')),
     authorName: String(data?.user?.screen_name || '未知作者'),
@@ -213,6 +217,8 @@ async function fetchJson(url: string, config: WeiboConfigLike, headers: Record<s
   }
 
   if (data?.ok === -100) throw new Error('微博解析失败：需要有效 Cookie 或 visitor 授权。')
+  if (data?.ok === 0 && data?.message) throw new Error(`微博解析失败：${String(data.message)}`)
+  if (data?.error) throw new Error(`微博解析失败：${String(data.error)}`)
   return data
 }
 
@@ -292,7 +298,36 @@ function extractWeiboId(url: string) {
   const direct = normalized.match(/weibo\.com\/\d+\/([0-9A-Za-z]+)/i)?.[1]
     || normalized.match(/m\.weibo\.cn\/(?:status|detail|\d+)\/([0-9A-Za-z]+)/i)?.[1]
   if (!direct) return ''
-  return /^\d+$/.test(direct) ? direct : direct
+  return /^\d+$/.test(direct) ? direct : weiboMblogIdToMid(direct)
+}
+
+export function weiboMblogIdToMid(mblogid: string) {
+  if (!/^[0-9A-Za-z]+$/.test(mblogid)) return mblogid
+
+  const chunks: string[] = []
+  for (let end = mblogid.length; end > 0; end -= 4) {
+    const start = Math.max(0, end - 4)
+    const decoded = decodeWeiboBase62(mblogid.slice(start, end))
+    chunks.unshift(start === 0 ? decoded : decoded.padStart(7, '0'))
+  }
+  return chunks.join('')
+}
+
+function decodeWeiboBase62(value: string) {
+  let result = 0n
+  for (const char of value) {
+    const digit = WEIBO_BASE62.indexOf(char)
+    if (digit < 0) return value
+    result = result * 62n + BigInt(digit)
+  }
+  return result.toString()
+}
+
+function isValidWeiboStatus(data: any) {
+  if (!data || typeof data !== 'object') return false
+  if (data.idstr || data.mid) return true
+  if (data.user || data.text || data.text_raw || data.page_info || data.pic_infos) return true
+  return false
 }
 
 function extractImageUrls(data: any) {

@@ -4,7 +4,7 @@ vi.mock('koishi', async () => ({
   h: (await vi.importActual<typeof import('@satorijs/core')>('@satorijs/core')).h,
 }))
 
-import { buildDouyinMessages, extractDouyinLinks, extractRouterDataPost } from '../src/parsers/douyin'
+import { buildDouyinMessages, extractDouyinLinks, extractRouterDataPost, fetchDouyinPost } from '../src/parsers/douyin'
 
 const config = {
   userAgent: 'test',
@@ -38,6 +38,12 @@ describe('extractDouyinLinks', () => {
     ])
   })
 
+  it('extracts ixigua douyin share links', () => {
+    expect(extractDouyinLinks('https://m.ixigua.com/douyin/share/video/6460640827424113166?aweme_type=107')).toEqual([
+      'https://m.ixigua.com/douyin/share/video/6460640827424113166?aweme_type=107',
+    ])
+  })
+
   it('extracts links from escaped card payloads', () => {
     const card = '<json data="{&quot;meta&quot;:{&quot;detail_1&quot;:{&quot;qqdocurl&quot;:&quot;https:\\/\\/v.douyin.com\\/_2ljF4AmKL8\\/&quot;}}}"/>'
     expect(extractDouyinLinks(card)).toEqual([
@@ -66,6 +72,13 @@ describe('extractRouterDataPost', () => {
     expect(post?.imageUrls).toEqual(['https://example.com/1.jpg'])
     expect(post?.dynamicImageUrls).toEqual(['https://example.com/gif.mp4'])
     expect(post?.videoUrls).toEqual([])
+  })
+
+  it('extracts slides data from router data', () => {
+    const html = `<script>window._ROUTER_DATA = {"loaderData":{"slides_(id)/page":{"videoInfoRes":{"item_list":[{"aweme_id":"3","desc":"slides","author":{"nickname":"carol"},"images":[{"url_list":["https://example.com/slide.jpg"]}] }]}}}}</script>`
+    const post = extractRouterDataPost(html, { id: '3', type: 'slides', url: 'https://www.iesdouyin.com/share/slides/3' })
+    expect(post?.url).toBe('https://www.douyin.com/note/3')
+    expect(post?.imageUrls).toEqual(['https://example.com/slide.jpg'])
   })
 })
 
@@ -163,5 +176,34 @@ describe('buildDouyinMessages', () => {
 
     expect(messages).toHaveLength(2)
     expect(messages[1].toString()).toContain('[视频文件过大，跳过解析]')
+  })
+})
+
+describe('fetchDouyinPost', () => {
+  it('falls back to page router data when slides API has no media', async () => {
+    const html = `<script>window._ROUTER_DATA = {"loaderData":{"slides_(id)/page":{"videoInfoRes":{"item_list":[{"aweme_id":"3","desc":"slides","author":{"nickname":"carol"},"images":[{"url_list":["https://example.com/slide.jpg"]}] }]}}}}</script>`
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          aweme_details: [{
+            aweme_id: '3',
+            desc: 'slides',
+            author: { nickname: 'carol' },
+            images: [],
+          }],
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        text: async () => html,
+      } as Response)
+
+    const post = await fetchDouyinPost('https://www.iesdouyin.com/share/slides/3', config)
+
+    expect(post.imageUrls).toEqual(['https://example.com/slide.jpg'])
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+
+    fetchMock.mockRestore()
   })
 })

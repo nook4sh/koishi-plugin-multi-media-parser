@@ -45,6 +45,7 @@ const LINK_PATTERNS = [
   new RegExp(`https?://(?:www\\.)?douyin\\.com/(?:video|note)/${URL_BOUNDARY}`, 'gi'),
   new RegExp(`https?://(?:www\\.)?iesdouyin\\.com/share/(?:slides|video|note)/${URL_BOUNDARY}`, 'gi'),
   new RegExp(`https?://m\\.douyin\\.com/share/(?:slides|video|note)/${URL_BOUNDARY}`, 'gi'),
+  new RegExp(`https?://m\\.ixigua\\.com/douyin/share/(?:video|note)/${URL_BOUNDARY}`, 'gi'),
   new RegExp(`https?://jingxuan\\.douyin\\.com/m/(?:slides|video|note)/${URL_BOUNDARY}`, 'gi'),
 ]
 
@@ -96,9 +97,17 @@ export async function fetchDouyinPost(rawUrl: string, config: DouyinConfigLike):
   const parsed = parseDouyinUrl(resolvedUrl)
   if (!parsed.id) throw new Error('未能识别抖音作品 ID。')
 
-  if (parsed.type === 'slides') return fetchSlidesPost(parsed, config)
-
   const errors: string[] = []
+  if (parsed.type === 'slides') {
+    try {
+      const post = await fetchSlidesPost(parsed, config)
+      if (hasDouyinMedia(post)) return post
+      errors.push('slidesinfo: 图集接口未返回媒体数据。')
+    } catch (error) {
+      errors.push(`slidesinfo: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
   for (const url of buildPageCandidates(parsed)) {
     try {
       const html = await fetchText(url, config, IOS_HEADERS)
@@ -158,6 +167,7 @@ export function extractRouterDataPost(html: string, parsed: ParsedDouyinUrl = { 
   const item = firstDefined(
     deepGet(routerData, ['loaderData', 'video_(id)/page', 'videoInfoRes', 'item_list', 0]),
     deepGet(routerData, ['loaderData', 'note_(id)/page', 'videoInfoRes', 'item_list', 0]),
+    deepGet(routerData, ['loaderData', 'slides_(id)/page', 'videoInfoRes', 'item_list', 0]),
   )
   if (!item) return null
 
@@ -166,21 +176,28 @@ export function extractRouterDataPost(html: string, parsed: ParsedDouyinUrl = { 
 
 function parseDouyinUrl(url: string): ParsedDouyinUrl {
   const normalized = ensureProtocol(url)
-  const match = normalized.match(/(?:douyin\.com\/(?:video|note)|(?:iesdouyin|m\.douyin)\.com\/share\/(?:slides|video|note)|jingxuan\.douyin\.com\/m\/(?:slides|video|note))\/(\d+)/i)
-  const typeMatch = normalized.match(/douyin\.com\/(video|note)\/\d+|(?:iesdouyin|m\.douyin)\.com\/share\/(slides|video|note)\/\d+|jingxuan\.douyin\.com\/m\/(slides|video|note)\/\d+/i)
+  const match = normalized.match(/(?:douyin\.com\/(?:video|note)|(?:iesdouyin|m\.douyin)\.com\/share\/(?:slides|video|note)|m\.ixigua\.com\/douyin\/share\/(?:video|note)|jingxuan\.douyin\.com\/m\/(?:slides|video|note))\/(\d+)/i)
+  const typeMatch = normalized.match(/douyin\.com\/(video|note)\/\d+|(?:iesdouyin|m\.douyin)\.com\/share\/(slides|video|note)\/\d+|m\.ixigua\.com\/douyin\/share\/(video|note)\/\d+|jingxuan\.douyin\.com\/m\/(slides|video|note)\/\d+/i)
   return {
     url: normalized,
     id: match?.[1] || '',
-    type: (typeMatch?.[1] || typeMatch?.[2] || typeMatch?.[3] || 'unknown') as ParsedDouyinUrl['type'],
+    type: (typeMatch?.[1] || typeMatch?.[2] || typeMatch?.[3] || typeMatch?.[4] || 'unknown') as ParsedDouyinUrl['type'],
   }
 }
 
 function buildPageCandidates(parsed: ParsedDouyinUrl) {
   const type = parsed.type === 'unknown' ? 'video' : parsed.type
-  return [
+  const canonicalType = type === 'slides' ? 'note' : type
+  return unique([
+    parsed.url,
+    `https://www.douyin.com/${canonicalType}/${parsed.id}`,
     `https://m.douyin.com/share/${type}/${parsed.id}`,
     `https://www.iesdouyin.com/share/${type}/${parsed.id}`,
-  ]
+  ])
+}
+
+function hasDouyinMedia(post: DouyinPost) {
+  return post.imageUrls.length > 0 || post.dynamicImageUrls.length > 0 || post.videoUrls.length > 0
 }
 
 async function fetchSlidesPost(parsed: ParsedDouyinUrl, config: DouyinConfigLike): Promise<DouyinPost> {
