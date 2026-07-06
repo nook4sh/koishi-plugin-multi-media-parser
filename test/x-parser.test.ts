@@ -123,4 +123,35 @@ describe('fetchXPost', () => {
 
     fetchMock.mockRestore()
   })
+
+  it('falls back to syndication tweet responses', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        text: async () => 'forbidden',
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          id_str: '1800000000000000000',
+          text: 'hello https://t.co/x',
+          favorite_count: 1,
+          conversation_count: 2,
+          entities: {
+            urls: [{ url: 'https://t.co/x', expanded_url: 'https://example.com' }],
+          },
+          user: { name: 'OpenAI', screen_name: 'openai' },
+          mediaDetails: [{ type: 'photo', media_url_https: 'https://example.com/1.jpg' }],
+        }),
+      } as Response)
+
+    const post = await fetchXPost('https://x.com/openai/status/1800000000000000000', config)
+    expect(post.desc).toBe('hello https://example.com')
+    expect(post.authorId).toBe('openai')
+    expect(post.imageUrls).toEqual(['https://example.com/1.jpg:orig'])
+    expect(fetchMock.mock.calls[1]?.[0]?.toString()).toContain('cdn.syndication.twimg.com/tweet-result')
+
+    fetchMock.mockRestore()
+  })
 })

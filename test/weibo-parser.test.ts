@@ -82,7 +82,10 @@ describe('fetchWeiboPost', () => {
       }),
     } as Response)
 
-    const post = await fetchWeiboPost('https://weibo.com/7207262816/P5kWdcfDe', config)
+    const post = await fetchWeiboPost('https://weibo.com/7207262816/P5kWdcfDe', {
+      ...config,
+      cookie: 'SUB=test; XSRF-TOKEN=test',
+    })
     expect(post.authorName).toBe('作者')
     expect(post.imageUrls).toEqual(['https://example.com/1.jpg'])
     expect(post.videoUrls).toEqual(['https://example.com/1.mp4'])

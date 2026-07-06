@@ -44,6 +44,10 @@ const LINK_PATTERNS = [
   new RegExp(`https?://card\\.weibo\\.com/article/m/show/id/${URL_BOUNDARY}`, 'gi'),
 ]
 
+let weiboCookie = ''
+let weiboVisitorReadyAt = 0
+const WEIBO_VISITOR_TTL = 3 * 60 * 60 * 1000
+
 export function extractWeiboLinks(content: string): string[] {
   return extractLinks(content, LINK_PATTERNS)
 }
@@ -127,7 +131,7 @@ async function fetchWeiboArticle(id: string, config: WeiboConfigLike): Promise<W
 
 async function fetchWeiboTv(fid: string, config: WeiboConfigLike): Promise<WeiboPost> {
   const payload = JSON.stringify({ Component_Play_Playinfo: { oid: fid } })
-  const response = await fetchWithTimeout(`https://weibo.com/tv/api/component?page=/show/${encodeURIComponent(fid)}`, config, {
+  const response = await fetchWeibo(`https://weibo.com/tv/api/component?page=/show/${encodeURIComponent(fid)}`, config, {
     method: 'POST',
     headers: {
       'content-type': 'application/x-www-form-urlencoded',
@@ -185,7 +189,7 @@ async function fetchLongText(id: string, config: WeiboConfigLike) {
 }
 
 async function fetchJson(url: string, config: WeiboConfigLike, headers: Record<string, string> = {}) {
-  const response = await fetchWithTimeout(url, config, {
+  let response = await fetchWeibo(url, config, {
     redirect: 'follow',
     headers: {
       accept: 'application/json,text/plain,*/*',
@@ -193,7 +197,72 @@ async function fetchJson(url: string, config: WeiboConfigLike, headers: Record<s
     },
   })
   if (!response.ok) throw new Error(`请求微博接口失败：HTTP ${response.status}`)
-  return response.json()
+  let data = await response.json() as any
+
+  if (data?.ok === -100 && !config.cookie) {
+    await initWeiboVisitor(config, true)
+    response = await fetchWeibo(url, config, {
+      redirect: 'follow',
+      headers: {
+        accept: 'application/json,text/plain,*/*',
+        ...headers,
+      },
+    })
+    if (!response.ok) throw new Error(`请求微博接口失败：HTTP ${response.status}`)
+    data = await response.json() as any
+  }
+
+  if (data?.ok === -100) throw new Error('微博解析失败：需要有效 Cookie 或 visitor 授权。')
+  return data
+}
+
+async function fetchWeibo(url: string, config: WeiboConfigLike, init: RequestInit = {}) {
+  if (!config.cookie) await initWeiboVisitor(config)
+
+  const cookie = config.cookie || weiboCookie
+  const xsrf = extractCookie(cookie, 'XSRF-TOKEN')
+  const response = await fetchWithTimeout(url, config, {
+    ...init,
+    headers: {
+      referer: 'https://www.weibo.com/',
+      ...(cookie ? { cookie } : {}),
+      ...(xsrf ? { 'x-xsrf-token': xsrf } : {}),
+      ...(init.headers || {}),
+    },
+  })
+  rememberSetCookie(response)
+  return response
+}
+
+async function initWeiboVisitor(config: WeiboConfigLike, force = false) {
+  if (!force && weiboCookie && Date.now() - weiboVisitorReadyAt < WEIBO_VISITOR_TTL) return
+
+  const response = await fetchWithTimeout('https://visitor.passport.weibo.cn/visitor/genvisitor2', config, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      origin: 'https://visitor.passport.weibo.cn',
+      referer: 'https://visitor.passport.weibo.cn/visitor/visitor?entry=sinawap&a=enter&url=https%3A%2F%2Fm.weibo.cn%2F',
+    },
+    body: new URLSearchParams({ cb: 'visitor_gray_callback', tid: '', new_tid: 'null' }),
+  })
+  const text = await response.text()
+  const match = text.match(/visitor_gray_callback\((.*)\)/)
+  const data = match ? JSON.parse(match[1]) : null
+  if (data?.retcode !== 20000000 || !data?.data?.sub || !data?.data?.subp) {
+    throw new Error('微博 visitor 授权初始化失败。')
+  }
+
+  weiboCookie = mergeCookies(weiboCookie, `SUB=${data.data.sub}; SUBP=${data.data.subp}`)
+  const home = await fetchWithTimeout('https://www.weibo.com', config, {
+    redirect: 'follow',
+    headers: {
+      cookie: weiboCookie,
+      referer: 'https://visitor.passport.weibo.cn/',
+    },
+  })
+  rememberSetCookie(home)
+  weiboVisitorReadyAt = Date.now()
 }
 
 function formatWeiboText(post: WeiboPost, config: WeiboConfigLike) {
@@ -259,3 +328,31 @@ function firstValue(value: unknown) {
   return String(Object.values(value)[0] || '')
 }
 
+function rememberSetCookie(response: Response) {
+  if (!response.headers) return
+  const headers = response.headers as Headers & { getSetCookie?: () => string[] }
+  const values = headers.getSetCookie?.() || (response.headers.get('set-cookie') ? [response.headers.get('set-cookie') as string] : [])
+  if (!values.length) return
+  weiboCookie = mergeCookies(weiboCookie, values.map((value) => value.split(';')[0]).join('; '))
+}
+
+function mergeCookies(base: string, next: string) {
+  const map = new Map<string, string>()
+  for (const source of [base, next]) {
+    for (const part of source.split(';')) {
+      const trimmed = part.trim()
+      if (!trimmed) continue
+      const index = trimmed.indexOf('=')
+      if (index <= 0) continue
+      map.set(trimmed.slice(0, index), trimmed.slice(index + 1))
+    }
+  }
+  return [...map].map(([key, value]) => `${key}=${value}`).join('; ')
+}
+
+function extractCookie(cookie: string, name: string) {
+  return cookie.split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${name}=`))
+    ?.slice(name.length + 1)
+}

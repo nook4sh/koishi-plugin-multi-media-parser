@@ -48,6 +48,13 @@ const ZHIHU_HEADERS = {
   referer: 'https://www.zhihu.com/',
 }
 
+const ZHIHU_MOBILE_HEADERS = {
+  accept: 'application/json,text/plain,*/*',
+  'user-agent': 'osee2unifiedRelease/7.33.0 (iPhone; iOS 18.5; Scale/3.00)',
+  'x-api-version': '3.0.91',
+  'x-app-version': '7.33.0',
+}
+
 export function extractZhihuLinks(content: string): string[] {
   const matches: Array<{ index: number, url: string }> = []
   for (const candidate of expandTextCandidates(content)) {
@@ -191,8 +198,14 @@ async function fetchZhihuJson(url: string, config: ZhihuConfigLike) {
       ...signZhihuFetchRequest(url),
     },
   })
-  if (!response.ok) throw new Error(`请求知乎接口失败：HTTP ${response.status}`)
-  return response.json()
+  if (response.ok) return response.json()
+
+  const mobile = await fetchWithTimeout(url, config, {
+    headers: ZHIHU_MOBILE_HEADERS,
+  })
+  if (mobile.ok) return mobile.json()
+
+  throw new Error(`请求知乎接口失败：HTTP ${response.status}；移动端接口 HTTP ${mobile.status}`)
 }
 
 function formatZhihuText(post: ZhihuPost, config: ZhihuConfigLike) {

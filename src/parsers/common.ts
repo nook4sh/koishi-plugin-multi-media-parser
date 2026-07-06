@@ -110,9 +110,10 @@ export function decodeHtmlEntities(text: string) {
 }
 
 export function stripHtml(html: string) {
-  return decodeHtmlEntities(html)
+  return decodeHtmlEntities(html
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/p>/gi, '\n')
+    .replace(/<[^>]+>/g, ''))
     .replace(/<[^>]+>/g, '')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
@@ -161,4 +162,3 @@ export function formatCount(value: unknown) {
 export function unique(values: string[]) {
   return [...new Set(values.filter(Boolean))]
 }
-

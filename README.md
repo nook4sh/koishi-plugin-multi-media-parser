@@ -26,9 +26,9 @@ npm run build
 ```bash
 npm run dev -- "http://xhslink.com/m/AixEkyLwpfs"
 npm run dev -- "https://v.douyin.com/_2ljF4AmKL8/"
-npm run dev -- "https://weibo.com/7207262816/P5kWdcfDe"
-npm run dev -- "https://x.com/openai/status/1800000000000000000"
-npm run dev -- "https://www.zhihu.com/question/67423622"
+npm run dev -- "https://m.weibo.cn/status/5249119644812157"
+npm run dev -- "https://x.com/OpenAI/status/2070555272230384038"
+npm run dev -- "https://www.zhihu.com/question/2057451748705448806/answer/2057471933021677167"
 ```
 
 ## Koishi 使用
