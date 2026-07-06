@@ -279,18 +279,19 @@ async function initWeiboVisitor(config: WeiboConfigLike, force = false) {
 }
 
 function formatWeiboText(post: WeiboPost, config: WeiboConfigLike) {
+  const content = post.desc || post.title || '微博'
   const meta = []
   if (config.showStats) meta.push(`点赞：${formatCount(post.likedCount)}  评论：${formatCount(post.commentCount)}  转发：${formatCount(post.repostCount)}`)
   if (config.showLink && post.url) meta.push(post.url)
 
   return formatMessageSections([
     [
-      `微博：${trimText(post.title || '微博', config.maxDescLength || 80, config.descTruncateSuffix)}`,
+      '微博',
       config.showAuthor ? `作者：${post.authorName}` : '',
     ],
     [
-      post.desc && post.desc !== post.title && config.maxDescLength > 0
-        ? trimText(post.desc, config.maxDescLength, config.descTruncateSuffix)
+      content && config.maxDescLength > 0
+        ? trimText(content, config.maxDescLength, config.descTruncateSuffix)
         : '',
     ],
     meta,

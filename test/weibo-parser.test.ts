@@ -56,7 +56,8 @@ describe('buildWeiboMessages', () => {
     }, config)
 
     expect(messages).toHaveLength(3)
-    expect(messages[0].toString()).toContain('微博：正文')
+    expect(messages[0].toString()).toContain('微博\n作者：作者')
+    expect(messages[0].toString()).not.toContain('微博：正文')
     expect(messages[0].toString()).toContain('作者：作者\n\n正文详情\n\n点赞：1')
     expect(messages[1].toString()).toContain('img')
     expect(messages[2].toString()).toContain('video')
