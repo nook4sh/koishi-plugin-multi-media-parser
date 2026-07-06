@@ -3,3 +3,19 @@ lib
 coverage
 .env
 *.log
+
+# IDE
+.idea/
+.vscode/
+
+# AI tools and local agent state
+.codex/
+.claude/
+.cursor/
+.continue/
+.windsurf/
+.aider*
+.openhands/
+.gemini/
+.roo/
+.kilocode/
