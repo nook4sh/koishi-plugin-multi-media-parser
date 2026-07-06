@@ -1,6 +1,6 @@
-# koishi-plugin-gensokyo-parser
+# koishi-plugin-multi-media-parser
 
-幻想乡解析器：一个面向 Koishi 的通用链接 / 卡片解析插件，目前支持小红书、抖音、微博、X / Twitter、知乎。
+Multi Media Parser：一个面向 Koishi 的通用链接 / 卡片解析插件，目前支持小红书、抖音、微博、X / Twitter、知乎。
 
 ## 功能
 
@@ -35,7 +35,7 @@ npm run dev -- "https://www.zhihu.com/question/67423622"
 
 ```yaml
 plugins:
-  /absolute/path/to/koishi-parser/lib:
+  /absolute/path/to/koishi-plugin-multi-media-parser/lib:
     enabled: true
     parsers:
       xhs:
@@ -54,7 +54,7 @@ plugins:
 
 ```yaml
 plugins:
-  /absolute/path/to/koishi-parser/lib:
+  /absolute/path/to/koishi-plugin-multi-media-parser/lib:
     enabled: true
     parsers:
       xhs:

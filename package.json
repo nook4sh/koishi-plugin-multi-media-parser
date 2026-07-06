@@ -1,5 +1,5 @@
 {
-  "name": "koishi-plugin-gensokyo-parser",
+  "name": "koishi-plugin-multi-media-parser",
   "version": "0.1.0",
   "description": "A universal Koishi parser plugin for social links and cards.",
   "main": "lib/index.js",
@@ -25,9 +25,14 @@
     "twitter",
     "x",
     "zhihu",
-    "gensokyo"
+    "multi-media"
   ],
   "license": "MIT",
+  "homepage": "https://github.com/nook4sh/koishi-plugin-multi-media-parser",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nook4sh/koishi-plugin-multi-media-parser.git"
+  },
   "peerDependencies": {
     "koishi": "^4.16.8"
   },

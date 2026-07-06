@@ -34,7 +34,7 @@ import {
   ZhihuPost,
 } from './parsers/zhihu'
 
-export const name = 'gensokyo-parser'
+export const name = 'multi-media-parser'
 
 const logger = new Logger(name)
 const VIDEO_TOO_LARGE_MESSAGE = '[视频文件过大，跳过解析]'
@@ -113,7 +113,7 @@ interface ParseTarget {
 
 export const Config: Schema<Config> = Schema.intersect([
   Schema.object({
-    enabled: Schema.boolean().default(true).description('开启幻想乡通用解析器。'),
+    enabled: Schema.boolean().default(true).description('开启 Multi Media 通用解析器。'),
     parseMode: Schema.array(Schema.union([
       Schema.const('link').description('普通链接'),
       Schema.const('card').description('卡片消息'),
@@ -203,7 +203,7 @@ export const Config: Schema<Config> = Schema.intersect([
 export const usage = `
 发送小红书、抖音链接或平台卡片即可自动解析。
 
-项目名：koishi-plugin-gensokyo-parser（幻想乡解析器）
+项目名：koishi-plugin-multi-media-parser
 
 支持示例：
 
