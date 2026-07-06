@@ -1,4 +1,5 @@
 import { h } from 'koishi'
+import { formatMessageSections } from './common'
 
 export interface DouyinConfigLike {
   userAgent: string
@@ -254,15 +255,20 @@ function buildPostFromAweme(item: any, parsed: ParsedDouyinUrl, sourceUrl: strin
 }
 
 function formatPostText(post: DouyinPost, config: DouyinConfigLike) {
-  const lines = [`抖音：${post.title || '抖音作品'}`]
-
-  if (config.showAuthor) lines.push(`作者：${post.authorName}`)
-  if (post.desc && post.desc !== post.title && config.maxDescLength > 0) {
-    lines.push(trimText(post.desc, config.maxDescLength, config.descTruncateSuffix))
-  }
-  if (config.showLink) lines.push(post.url)
-
-  return lines.join('\n')
+  return formatMessageSections([
+    [
+      `抖音：${post.title || '抖音作品'}`,
+      config.showAuthor ? `作者：${post.authorName}` : '',
+    ],
+    [
+      post.desc && post.desc !== post.title && config.maxDescLength > 0
+        ? trimText(post.desc, config.maxDescLength, config.descTruncateSuffix)
+        : '',
+    ],
+    [
+      config.showLink ? post.url : '',
+    ],
+  ])
 }
 
 function expandTextCandidates(content: string): string[] {

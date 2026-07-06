@@ -5,6 +5,7 @@ import {
   expandTextCandidates,
   fetchWithTimeout,
   formatCount,
+  formatMessageSections,
   normalizeText,
   ParserConfigLike,
   stripHtml,
@@ -210,14 +211,22 @@ async function fetchZhihuJson(url: string, config: ZhihuConfigLike) {
 
 function formatZhihuText(post: ZhihuPost, config: ZhihuConfigLike) {
   const label = post.type === 'article' ? '知乎专栏' : post.type === 'answer' ? '知乎回答' : '知乎问题'
-  const lines = [`${label}：${post.title || label}`]
-  if (config.showAuthor) lines.push(`作者：${post.authorName}`)
-  if (post.desc && config.maxDescLength > 0) lines.push(trimText(post.desc, config.maxDescLength, config.descTruncateSuffix))
-  if (config.showStats) {
-    lines.push(`赞同/喜欢：${formatCount(post.likedCount)}  评论：${formatCount(post.commentCount)}  收藏：${formatCount(post.collectCount)}  浏览：${formatCount(post.viewCount)}`)
-  }
-  if (config.showLink) lines.push(post.url)
-  return lines.join('\n')
+  const meta = []
+  if (config.showStats) meta.push(`赞同/喜欢：${formatCount(post.likedCount)}  评论：${formatCount(post.commentCount)}  收藏：${formatCount(post.collectCount)}  浏览：${formatCount(post.viewCount)}`)
+  if (config.showLink) meta.push(post.url)
+
+  return formatMessageSections([
+    [
+      `${label}：${post.title || label}`,
+      config.showAuthor ? `作者：${post.authorName}` : '',
+    ],
+    [
+      post.desc && config.maxDescLength > 0
+        ? trimText(post.desc, config.maxDescLength, config.descTruncateSuffix)
+        : '',
+    ],
+    meta,
+  ])
 }
 
 function extractImageUrls(html: string) {

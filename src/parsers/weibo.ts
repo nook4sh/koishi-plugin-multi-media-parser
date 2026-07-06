@@ -4,6 +4,7 @@ import {
   extractLinks,
   fetchWithTimeout,
   formatCount,
+  formatMessageSections,
   ParserConfigLike,
   stripHtml,
   trimText,
@@ -272,16 +273,22 @@ async function initWeiboVisitor(config: WeiboConfigLike, force = false) {
 }
 
 function formatWeiboText(post: WeiboPost, config: WeiboConfigLike) {
-  const lines = [`微博：${trimText(post.title || '微博', config.maxDescLength || 80, config.descTruncateSuffix)}`]
-  if (config.showAuthor) lines.push(`作者：${post.authorName}`)
-  if (post.desc && post.desc !== post.title && config.maxDescLength > 0) {
-    lines.push(trimText(post.desc, config.maxDescLength, config.descTruncateSuffix))
-  }
-  if (config.showStats) {
-    lines.push(`点赞：${formatCount(post.likedCount)}  评论：${formatCount(post.commentCount)}  转发：${formatCount(post.repostCount)}`)
-  }
-  if (config.showLink && post.url) lines.push(post.url)
-  return lines.join('\n')
+  const meta = []
+  if (config.showStats) meta.push(`点赞：${formatCount(post.likedCount)}  评论：${formatCount(post.commentCount)}  转发：${formatCount(post.repostCount)}`)
+  if (config.showLink && post.url) meta.push(post.url)
+
+  return formatMessageSections([
+    [
+      `微博：${trimText(post.title || '微博', config.maxDescLength || 80, config.descTruncateSuffix)}`,
+      config.showAuthor ? `作者：${post.authorName}` : '',
+    ],
+    [
+      post.desc && post.desc !== post.title && config.maxDescLength > 0
+        ? trimText(post.desc, config.maxDescLength, config.descTruncateSuffix)
+        : '',
+    ],
+    meta,
+  ])
 }
 
 function extractArticleId(url: string) {

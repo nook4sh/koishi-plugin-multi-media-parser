@@ -63,6 +63,7 @@ describe('buildZhihuMessages', () => {
 
     expect(messages).toHaveLength(2)
     expect(messages[0].toString()).toContain('知乎回答：问题')
+    expect(messages[0].toString()).toContain('作者：作者\n\n回答\n\n赞同/喜欢：1')
     expect(messages[1].toString()).toContain('img')
   })
 })

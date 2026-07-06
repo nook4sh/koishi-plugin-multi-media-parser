@@ -159,6 +159,13 @@ export function formatCount(value: unknown) {
   return num < 10000 ? String(num) : `${(num / 10000).toFixed(1)}万`
 }
 
+export function formatMessageSections(sections: string[][]) {
+  return sections
+    .map((section) => section.filter(Boolean).join('\n').trim())
+    .filter(Boolean)
+    .join('\n\n')
+}
+
 export function unique(values: string[]) {
   return [...new Set(values.filter(Boolean))]
 }

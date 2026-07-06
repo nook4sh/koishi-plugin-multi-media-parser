@@ -36,6 +36,25 @@ describe('extractXLinks', () => {
 })
 
 describe('buildXPost and buildXMessages', () => {
+  it('separates tweet text sections with blank lines', () => {
+    const messages = buildXMessages({
+      id: '1',
+      url: 'https://x.com/openai/status/1',
+      title: '标题',
+      desc: '正文',
+      authorName: 'OpenAI',
+      authorId: 'openai',
+      likedCount: 1,
+      repostCount: 2,
+      commentCount: 3,
+      quoteCount: 4,
+      imageUrls: [],
+      videoUrls: [],
+    }, config)
+
+    expect(messages[0].toString()).toContain('作者：OpenAI (@openai)\n\n正文\n\n点赞：1')
+  })
+
   it('maps tweet result media and stats', () => {
     const post = buildXPost({
       result: {

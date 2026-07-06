@@ -1,4 +1,5 @@
 import { h } from 'koishi'
+import { formatMessageSections } from './common'
 
 export interface XhsConfigLike {
   userAgent: string
@@ -314,20 +315,22 @@ function buildNote(data: any, url: string, config: XhsConfigLike): XhsNote {
 }
 
 function formatNoteText(note: XhsNote, config: XhsConfigLike) {
-  const lines = [
-    `小红书：${note.title}`,
-    `作者：${note.authorName}`,
-  ]
+  const meta = []
+  if (config.showStats) meta.push(`点赞：${displayCount(note.likedCount)}  收藏：${displayCount(note.collectedCount)}  评论：${displayCount(note.commentCount)}  分享：${displayCount(note.shareCount)}`)
+  if (config.showLink) meta.push(note.url)
 
-  if (note.desc && config.maxDescLength > 0) {
-    lines.push(trimText(note.desc, config.maxDescLength, config.descTruncateSuffix))
-  }
-  if (config.showStats) {
-    lines.push(`点赞：${displayCount(note.likedCount)}  收藏：${displayCount(note.collectedCount)}  评论：${displayCount(note.commentCount)}  分享：${displayCount(note.shareCount)}`)
-  }
-  if (config.showLink) lines.push(note.url)
-
-  return lines.join('\n')
+  return formatMessageSections([
+    [
+      `小红书：${note.title}`,
+      `作者：${note.authorName}`,
+    ],
+    [
+      note.desc && config.maxDescLength > 0
+        ? trimText(note.desc, config.maxDescLength, config.descTruncateSuffix)
+        : '',
+    ],
+    meta,
+  ])
 }
 
 function extractImageUrls(data: any, format: XhsConfigLike['imageFormat']) {

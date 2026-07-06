@@ -3,6 +3,7 @@ import {
   extractLinks,
   fetchWithTimeout,
   formatCount,
+  formatMessageSections,
   ParserConfigLike,
   stripHtml,
   trimText,
@@ -179,16 +180,22 @@ function extractMedia(result: any, type: 'image' | 'video') {
 }
 
 function formatXText(post: XPost, config: XConfigLike) {
-  const lines = [`X：${trimText(post.title || 'X 推文', config.maxDescLength || 80, config.descTruncateSuffix)}`]
-  if (config.showAuthor) lines.push(`作者：${post.authorName}${post.authorId ? ` (@${post.authorId})` : ''}`)
-  if (post.desc && post.desc !== post.title && config.maxDescLength > 0) {
-    lines.push(trimText(post.desc, config.maxDescLength, config.descTruncateSuffix))
-  }
-  if (config.showStats) {
-    lines.push(`点赞：${formatCount(post.likedCount)}  回复：${formatCount(post.commentCount)}  转发：${formatCount(post.repostCount)}  引用：${formatCount(post.quoteCount)}`)
-  }
-  if (config.showLink) lines.push(post.url)
-  return lines.join('\n')
+  const meta = []
+  if (config.showStats) meta.push(`点赞：${formatCount(post.likedCount)}  回复：${formatCount(post.commentCount)}  转发：${formatCount(post.repostCount)}  引用：${formatCount(post.quoteCount)}`)
+  if (config.showLink) meta.push(post.url)
+
+  return formatMessageSections([
+    [
+      `X：${trimText(post.title || 'X 推文', config.maxDescLength || 80, config.descTruncateSuffix)}`,
+      config.showAuthor ? `作者：${post.authorName}${post.authorId ? ` (@${post.authorId})` : ''}` : '',
+    ],
+    [
+      post.desc && post.desc !== post.title && config.maxDescLength > 0
+        ? trimText(post.desc, config.maxDescLength, config.descTruncateSuffix)
+        : '',
+    ],
+    meta,
+  ])
 }
 
 async function fetchXPostFromSyndication(rawUrl: string, id: string, config: XConfigLike): Promise<XPost> {

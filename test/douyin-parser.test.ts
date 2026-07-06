@@ -120,6 +120,7 @@ describe('buildDouyinMessages', () => {
     })
 
     expect(messages[0].toString()).toContain('12345...(已截断)')
+    expect(messages[0].toString()).toContain('作者：作者\n\n12345...(已截断)')
     expect(messages[0].toString()).not.toContain('1234567890')
   })
 

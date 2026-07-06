@@ -69,6 +69,7 @@ describe('buildXhsMessages', () => {
 
     expect(messages).toHaveLength(2)
     expect(messages[0].toString()).toContain('小红书：标题')
+    expect(messages[0].toString()).toContain('作者：作者\n\n描述\n\n点赞：1')
     expect(messages[1].toString()).toContain('img')
   })
 
