@@ -133,7 +133,7 @@ export const Config: Schema<Config> = Schema.intersect([
   Schema.object({
     showImages: Schema.boolean().default(true).description('返回图片/动图。'),
     maxImages: Schema.number().min(0).max(18).step(1).default(9).description('单个作品最多发送图片数。'),
-    maxDescLength: Schema.number().min(0).max(2000).step(10).default(160).description('描述最大字数。设为 0 时不展示描述。'),
+    maxDescLength: Schema.number().min(0).max(10000).step(10).default(160).description('描述最大字数。设为 0 时不展示描述。'),
     descTruncateSuffix: Schema.string().default('...(已截断)').description('描述超出最大字数时追加的截断标志。'),
     showVideo: Schema.boolean().default(true).description('返回视频元素。'),
     downloadVideoAsFile: Schema.boolean().default(false).description('尝试先下载首个视频再发送，缓解 QQ / OneBot 等平台直链“资源已过期”的问题。会增加带宽消耗。'),
@@ -143,7 +143,7 @@ export const Config: Schema<Config> = Schema.intersect([
       Schema.const('file').description('写入临时文件并通过 file:// URL 发送（Napcat 等特殊环境）'),
     ]).default('buffer').description('下载视频后的发送方式。'),
     maxDownloadedVideoSizeMB: Schema.number().min(0).max(2048).step(1).default(20).description('下载视频大小上限，单位 MB。超过后自动回退为发送视频直链；设为 0 表示不限制。'),
-    maxVideoSendSizeMB: Schema.number().min(0).max(2048).step(1).default(100).description('视频发送大小上限，单位 MB。超过后不发送视频，包括直链；设为 0 表示不限制。'),
+    maxVideoSendSizeMB: Schema.number().min(0).max(2048).step(1).default(100).description('视频发送大小上限，单位 MB。超过后不发送视频元素，并附上视频直链；设为 0 表示不限制。'),
     showLink: Schema.boolean().default(true).description('展示原文链接。'),
   }).description('内容设置'),
   Schema.object({
@@ -401,7 +401,7 @@ async function prepareXhsVideo(ctx: Context, note: XhsNote, config: Config): Pro
   return prepareVideo(ctx, note, config, {
     parser: 'xhs',
     urls: (value) => value.videoUrls,
-    remove: (value) => ({ ...value, videoBuffer: undefined, videoUrls: [], videoSkippedMessage: VIDEO_TOO_LARGE_MESSAGE }),
+    remove: (value, videoUrl) => ({ ...value, videoBuffer: undefined, videoUrls: [], videoSkippedMessage: buildVideoTooLargeMessage(videoUrl) }),
     replace: (value, replacement) => ({
       ...value,
       videoBuffer: replacement.kind === 'buffer' ? replacement.buffer : undefined,
@@ -417,12 +417,12 @@ async function prepareDouyinVideo(ctx: Context, post: DouyinPost, config: Config
   return prepareVideo(ctx, post, config, {
     parser: 'douyin',
     urls: (value) => [...value.dynamicImageUrls, ...value.videoUrls],
-    remove: (value) => ({
+    remove: (value, videoUrl) => ({
       ...value,
       videoBuffer: undefined,
       dynamicImageUrls: [],
       videoUrls: [],
-      videoSkippedMessage: VIDEO_TOO_LARGE_MESSAGE,
+      videoSkippedMessage: buildVideoTooLargeMessage(videoUrl),
     }),
     replace: (value, replacement, firstVideo) => {
       const fromDynamic = firstVideo === value.dynamicImageUrls[0]
@@ -450,11 +450,11 @@ async function prepareDouyinVideo(ctx: Context, post: DouyinPost, config: Config
   })
 }
 
-async function prepareSimpleVideo<T extends WeiboPost | XPost | ZhihuPost>(ctx: Context, post: T, config: Config, parser: string): Promise<T> {
+export async function prepareSimpleVideo<T extends WeiboPost | XPost | ZhihuPost>(ctx: Context, post: T, config: Config, parser: string): Promise<T> {
   return prepareVideo(ctx, post, config, {
     parser,
     urls: (value) => value.videoUrls,
-    remove: (value) => ({ ...value, videoBuffer: undefined, videoUrls: [], videoSkippedMessage: VIDEO_TOO_LARGE_MESSAGE }),
+    remove: (value, videoUrl) => ({ ...value, videoBuffer: undefined, videoUrls: [], videoSkippedMessage: buildVideoTooLargeMessage(videoUrl) }),
     replace: (value, replacement) => ({
       ...value,
       videoBuffer: replacement.kind === 'buffer' ? replacement.buffer : undefined,
@@ -473,7 +473,7 @@ async function prepareVideo<T>(
   adapter: {
     parser: string
     urls: (value: T) => string[]
-    remove: (value: T) => T
+    remove: (value: T, videoUrl: string) => T
     replace: (value: T, replacement: { kind: 'buffer', buffer: Buffer, mimeType: string } | { kind: 'url', src: string, mimeType: string }, firstVideo: string) => T
   },
 ): Promise<T> {
@@ -493,12 +493,20 @@ async function prepareVideo<T>(
   }
 
   const maxSendSizeBytes = getSizeLimitBytes(config.maxVideoSendSizeMB, 100)
-  const remoteSize = await getRemoteVideoSize(ctx, firstVideo, config)
+  const maxDownloadSizeBytes = getSizeLimitBytes(config.maxDownloadedVideoSizeMB, 0)
+  const remoteSize = await getRemoteVideoSize(ctx, firstVideo, config, Boolean(maxSendSizeBytes || maxDownloadSizeBytes))
   if (remoteSize !== undefined && maxSendSizeBytes && remoteSize > maxSendSizeBytes) {
     if (config.loggerinfo) {
       logger.info(`skip video send: remote size=${formatBytes(remoteSize)}, max=${formatBytes(maxSendSizeBytes)}, url=${firstVideo}`)
     }
-    return adapter.remove(value)
+    return adapter.remove(value, firstVideo)
+  }
+
+  if (remoteSize !== undefined && maxDownloadSizeBytes && remoteSize > maxDownloadSizeBytes) {
+    if (config.loggerinfo) {
+      logger.info(`skip video download: remote size=${formatBytes(remoteSize)}, max=${formatBytes(maxDownloadSizeBytes)}, fallback=direct URL`)
+    }
+    return value
   }
 
   if (!config.downloadVideoAsFile) {
@@ -518,21 +526,18 @@ async function prepareVideo<T>(
     const buffer = Buffer.from(file.data)
     const mimeType = (file as any).type || (file as any).mime || 'video/mp4'
     const mode = config.videoDownloadMode || 'buffer'
-    const maxSizeBytes = config.maxDownloadedVideoSizeMB > 0
-      ? config.maxDownloadedVideoSizeMB * 1024 * 1024
-      : 0
 
     if (config.loggerinfo) {
-      logger.info(`download first video success: size=${formatBytes(buffer.length)}, mime=${mimeType}, mode=${mode}, max=${maxSizeBytes ? formatBytes(maxSizeBytes) : 'unlimited'}`)
+      logger.info(`download first video success: size=${formatBytes(buffer.length)}, mime=${mimeType}, mode=${mode}, max=${maxDownloadSizeBytes ? formatBytes(maxDownloadSizeBytes) : 'unlimited'}`)
     }
 
     if (maxSendSizeBytes && buffer.length > maxSendSizeBytes) {
       if (config.loggerinfo) logger.info(`skip video send: downloaded size=${formatBytes(buffer.length)}, max=${formatBytes(maxSendSizeBytes)}`)
-      return adapter.remove(value)
+      return adapter.remove(value, firstVideo)
     }
 
-    if (maxSizeBytes && buffer.length > maxSizeBytes) {
-      if (config.loggerinfo) logger.info(`downloaded video exceeds limit: size=${formatBytes(buffer.length)}, max=${formatBytes(maxSizeBytes)}, fallback=direct URL`)
+    if (maxDownloadSizeBytes && buffer.length > maxDownloadSizeBytes) {
+      if (config.loggerinfo) logger.info(`downloaded video exceeds limit: size=${formatBytes(buffer.length)}, max=${formatBytes(maxDownloadSizeBytes)}, fallback=direct URL`)
       return value
     }
 
@@ -556,9 +561,8 @@ async function prepareVideo<T>(
   }
 }
 
-async function getRemoteVideoSize(ctx: Context, url: string, config: Config): Promise<number | undefined> {
-  const maxSendSizeBytes = getSizeLimitBytes(config.maxVideoSendSizeMB, 100)
-  if (!maxSendSizeBytes) return undefined
+async function getRemoteVideoSize(ctx: Context, url: string, config: Config, enabled = true): Promise<number | undefined> {
+  if (!enabled) return undefined
 
   try {
     if (config.loggerinfo) logger.info(`check remote video size start: url=${url}`)
@@ -582,12 +586,16 @@ async function getRemoteVideoSize(ctx: Context, url: string, config: Config): Pr
       return undefined
     }
 
-    if (config.loggerinfo) logger.info(`check remote video size success: size=${formatBytes(size)}, max=${formatBytes(maxSendSizeBytes)}`)
+    if (config.loggerinfo) logger.info(`check remote video size success: size=${formatBytes(size)}`)
     return size
   } catch (error) {
     if (config.loggerinfo) logger.info(`check remote video size failed: ${error instanceof Error ? error.message : String(error)}`)
     return undefined
   }
+}
+
+function buildVideoTooLargeMessage(videoUrl: string): string {
+  return `${VIDEO_TOO_LARGE_MESSAGE}\n视频直链：${videoUrl}`
 }
 
 function getSizeLimitBytes(sizeMB: number | undefined, fallbackMB: number): number {
