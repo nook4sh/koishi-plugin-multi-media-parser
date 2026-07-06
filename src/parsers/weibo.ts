@@ -106,7 +106,13 @@ export function buildWeiboMessages(post: WeiboPost, config: WeiboConfigLike, ses
 async function resolveWeiboLink(rawUrl: string, config: WeiboConfigLike) {
   const url = ensureProtocol(rawUrl)
   if (!/mapp\.api\.weibo\.cn\/fx/i.test(url)) return url
+  const redirect = await fetchWithTimeout(url, config, { redirect: 'manual' })
+  const location = redirect.headers.get('location')
+  if (location) return new URL(location, url).toString()
+
   const response = await fetchWithTimeout(url, config, { redirect: 'follow' })
+  const visitorTarget = new URL(response.url || url).searchParams.get('url')
+  if (visitorTarget) return visitorTarget
   return response.url || url
 }
 

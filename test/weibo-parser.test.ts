@@ -64,6 +64,31 @@ describe('buildWeiboMessages', () => {
 })
 
 describe('fetchWeiboPost', () => {
+  it('uses the first redirect location from mapp share links', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce({
+        headers: new Headers({ location: 'https://m.weibo.cn/status/5249119644812157' }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          idstr: '5249119644812157',
+          text_raw: '微博正文',
+          user: { idstr: '7207262816', screen_name: '作者' },
+        }),
+      } as Response)
+
+    const post = await fetchWeiboPost('https://mapp.api.weibo.cn/fx/90d9f2487035b864efd0a054e01298cd.html', {
+      ...config,
+      cookie: 'SUB=test; XSRF-TOKEN=test',
+    })
+
+    expect(post.id).toBe('5249119644812157')
+    expect(fetchMock.mock.calls[1]?.[0]?.toString()).toContain('id=5249119644812157')
+
+    fetchMock.mockRestore()
+  })
+
   it('converts mblogid status links to numeric mids for the status API', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
       ok: true,
